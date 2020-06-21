@@ -1,5 +1,6 @@
 import threading
 import time
+from dataclasses import Field
 
 from abstractPi import AbstractRaspberryPi
 from communication.abstractReceiver import AbstractReceiver
@@ -23,18 +24,25 @@ from sensors.servo import Servo
 from sensors.tempSensor import TempSensor
 from sensors.weightSensor import WeightSensor
 
-
-
+#This raspberryPi is responsible for measuring the weight of the birds which come to the feeder. Its purpose is
+#to check whether the birds are small. If they are, the PI will make the servo motor open the door. If not, a
+#request will be sent to PI2 to get the number of birds. If the number is one and the weight is too large, the doors
+#will close. However, if the weight is beyond a given threshold, but the number of birds is greater than four,
+#the door will remain opened.
 class RaspberryPiW(AbstractRaspberryPi):
+    birds = 0   #field for the number of birds received from the other PI (PI2)
+
     def __init__(self):
         self.activeSensors = {}
-        self.initialSensors = {"weight": WeightSensor, "servo": Servo}
+        self.initialSensors = {"weight": WeightSensor, "motor": Servo}
         self.sensorCnt = 0
-        AbstractRaspberryPi.__init__(self, "piW", 5560, 5561)
+        self.birds = 0
+        AbstractRaspberryPi.__init__(self, "pi3", 5555, 5556)
 
         for s in self.initialSensors:
             self.add_sensor(self.initialSensors[s], s)
 
+        self.set_window_location(50, 50)
         self.show()
 
         # communication
@@ -47,32 +55,51 @@ class RaspberryPiW(AbstractRaspberryPi):
         threading.Thread(target=self.sampling_thread).start()
 
     def set_window_location(self, x, y):
-        self.move(x,y)
+        self.move(x, y)
 
     def receiver_thread(self):
         while True:
             incoming_request = self.receiver.socket.recv()
-            if "weight" in str(incoming_request):
-                self.receiver.socket.send_string("pW sends weight:"+str(self.activeSensors["weight"].get_weight()))
-            elif "servo" in str(incoming_request):
-                if "up" in str(incoming_request):
-                    self.activeSensors["servo"].on("up")
-                    self.receiver.socket.send_string("pW sends servo:up")
-                elif "down" in str(incoming_request):
-                    self.activeSensors["servo"].on("down")
-                    self.receiver.socket.send_string("pW sends servo:down")
-                elif "off" in str(incoming_request):
-                    self.activeSensors["servo"].off()
-                    self.receiver.socket.send_string("pW sends servo:off")
 
+#The main logic for the communication between two PIs is located in this method. Here we first send the message
+#asking for data, and we also receive the response in this method. The amount of birds will be extracted from
+#the response (string).
     def send_message(self, message):
         self.lock.acquire()
         self.sender.socket.send_string(message)
-        response = self.sender.socket.recv()
+
+        response = str(self.sender.socket.recv())
+        if "p2" in response:
+            time_stamp = time.asctime()
+            for word in response.split(' ', 5):
+                if word.isdigit():
+                    self.birds = (int(word))
+                    print("P3: Response from P2 (" + str(self.birds) + " birds) received at" + str(time_stamp))
         self.lock.release()
 
+#Here, we use the data we have received from the weight sensor and possibly the amount of birds from the other PI.
+#If the weight measured is smaller or equal 10 the door will be opened by the servo. Otherwise, there are two
+#possibilities: the amount of birds is smaller than 4 which means that there are rather large birds. In this case
+#the door will be closed. However, if the weight is greater 10, and the amount of birds are greater equal 4, the
+#door will remain open.
     def sampling_thread(self):
-        time.sleep(5)
+        #  time.sleep(5)
         while True:
-            None
-            # Do some sampling
+            measured_weight = self.activeSensors["weight"].get_weight()
+            if measured_weight >= 10:
+                self.send_message("p3 request: no. of birds ")
+                if self.birds < 4:
+                    self.activeSensors["motor"].on("down")
+                    self.activeSensors["motor"].off()
+                    print("Closed! Weight: " + str(measured_weight) + ", No. of birds: " + str(self.birds))
+                    time.sleep(2)
+                else:
+                    self.activeSensors["motor"].on("up")
+                    self.activeSensors["motor"].off()
+                    print("Open! Weight: " + str(measured_weight) + ",  No. of birds: " + str(self.birds))
+                    time.sleep(2)
+            else:
+                self.activeSensors["motor"].on("up")
+                self.activeSensors["motor"].off()
+                print("Open! Weight: " + str(measured_weight) + ",  No. of birds: " + str(self.birds))
+                time.sleep(2)
