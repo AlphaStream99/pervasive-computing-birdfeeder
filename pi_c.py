@@ -57,9 +57,9 @@ class RaspberryPiC(AbstractRaspberryPi):
             incoming_request = self.receiver.socket.recv()
             if "camera" in str(incoming_request):
             # TODO: send image data
-                #self.receiver.socket.send(self.activeSensors["camera"].get_image())
+                self.receiver.socket.send(self.activeSensors["camera"].get_image())
                 #Test:
-                self.receiver.socket.send(b'\x00\x01\x00\x02\x00\x03')
+                #self.receiver.socket.send(b'\x00\x01\x00\x02\x00\x03')
 
     def send_message(self, message):
         self.lock.acquire()
